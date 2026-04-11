@@ -72,7 +72,7 @@ export class MemoryStore {
     };
   }
 
-  createPlan(userId: string, plan: Omit<LearningPlan, 'id' | 'createdAt'>): LearningPlan {
+  createPlan(userId: string, plan: Omit<LearningPlan, 'id' | 'createdAt' | 'userId' | 'startDate'>): LearningPlan {
     const stmt = this.db.prepare(`
       INSERT INTO plans (user_id, daily_goal, target_days, start_date, reminder_time)
       VALUES (?, ?, ?, ?, ?)

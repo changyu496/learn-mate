@@ -76,8 +76,7 @@ Keep questions friendly and concise.`
     this.store.createPlan(userId, {
       dailyGoal: preferences.dailyCapacity,
       targetDays: preferences.targetDays,
-      reminderTime: '20:00',
-      startDate: new Date().toISOString().split('T')[0]
+      reminderTime: '20:00'
     });
 
     this.store.setMemory(userId, 'preferences', preferences);

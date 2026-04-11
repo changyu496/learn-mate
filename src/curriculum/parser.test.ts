@@ -16,13 +16,14 @@ describe('CurriculumParser', () => {
   it('should parse lecture content', async () => {
     const lecture = await parser.getLecture('lecture-01-why-capable-agents-still-fail');
     expect(lecture).toBeDefined();
-    expect(lecture.id).toContain('lecture-01');
-    expect(lecture.content.length).toBeGreaterThan(0);
+    expect(lecture!.id).toContain('lecture-01');
+    expect(lecture!.content.length).toBeGreaterThan(0);
   });
 
   it('should extract key concepts', async () => {
     const lecture = await parser.getLecture('lecture-01-why-capable-agents-still-fail');
-    expect(lecture.concepts.length).toBeGreaterThan(0);
+    expect(lecture).toBeDefined();
+    expect(lecture!.concepts.length).toBeGreaterThan(0);
   });
 
   it('should return all lectures in order', async () => {
