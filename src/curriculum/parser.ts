@@ -129,4 +129,46 @@ export class CurriculumParser {
 
     return concepts;
   }
+
+  async getLectureWithTeachingPoints(lectureId: string): Promise<LectureWithPoints | null> {
+    const lecture = await this.getLecture(lectureId);
+    if (!lecture) return null;
+
+    // 从课程内容中提取 teaching points
+    // 这里简化处理，实际可以从单独的文件读取
+    const teachingPoints = this.extractTeachingPoints(lecture.content, lecture.concepts);
+
+    return {
+      ...lecture,
+      teachingPoints
+    };
+  }
+
+  private extractTeachingPoints(content: string, concepts: string[]): TeachingPoint[] {
+    // 根据概念列表生成讲解要点
+    // 实际实现中，这些数据可能来自课程文件中的特定标记
+    return concepts.map(concept => ({
+      concept,
+      explanation: '',  // LLM 会根据 concept 生成
+      example: '',      // LLM 会根据 concept 生成
+      question: `你能用自己的话说说"${concept}"是什么意思吗？`
+    }));
+  }
+}
+
+// 讲解要点
+export interface TeachingPoint {
+  concept: string;      // 核心概念
+  explanation: string;  // 通俗解释
+  example: string;      // 例子
+  question: string;     // 验证问题
+}
+
+export interface LectureWithPoints {
+  id: string;
+  title: string;
+  content: string;
+  concepts: string[];
+  order: number;
+  teachingPoints: TeachingPoint[];
 }
