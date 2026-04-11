@@ -1,3 +1,11 @@
+// 用户
+export interface User {
+  id: string;
+  name: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // 用户画像
 export interface UserProfile {
   id: string;

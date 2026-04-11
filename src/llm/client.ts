@@ -1,5 +1,3 @@
-import { z } from 'zod';
-
 export interface LLMConfig {
   apiKey: string;
   model?: string;
@@ -25,20 +23,28 @@ export class LLMClient {
 
   constructor(config: LLMConfig) {
     this.apiKey = config.apiKey;
-    this.model = config.model || 'MiniMax-Text-01';
-    this.baseUrl = config.baseUrl || 'https://api.minimax.io/v1';
+    this.model = config.model || 'MiniMax-M2.7';
+    this.baseUrl = config.baseUrl || 'https://api.minimaxi.com/anthropic';
   }
 
   async generate(messages: Message[]): Promise<string> {
-    const response = await fetch(`${this.baseUrl}/text/chatcompletion_v2`, {
+    // Convert messages to Anthropic format
+    const anthropicMessages = messages.map(msg => ({
+      role: msg.role,
+      content: msg.role === 'user' ? [{ type: 'text' as const, text: msg.content }] : msg.content
+    }));
+
+    const response = await fetch(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`
+        'Authorization': `Bearer ${this.apiKey}`,
+        'x-api-id': 'cli'
       },
       body: JSON.stringify({
         model: this.model,
-        messages
+        max_tokens: 4096,
+        messages: anthropicMessages
       })
     });
 
@@ -48,48 +54,57 @@ export class LLMClient {
     }
 
     const data = await response.json() as {
-      choices?: Array<{ messages: Array<{ content: string }> }>;
-      text?: string;
+      content?: Array<{ type: string; text?: string }>;
     };
 
-    if (data.choices && data.choices[0]?.messages) {
-      return data.choices[0].messages[data.choices[0].messages.length - 1]?.content || '';
+    if (data.content && Array.isArray(data.content)) {
+      for (const block of data.content) {
+        if (block.type === 'text' && block.text) {
+          return block.text;
+        }
+      }
     }
 
-    return data.text || '';
+    return '';
   }
 
   async generateQuiz(topic: string, count: number = 3): Promise<QuizQuestion[]> {
-    const prompt = `Generate ${count} quiz questions about "${topic}".
+    const prompt = `Generate ${count} quiz question about "${topic}".
 
-For each question, provide:
+Provide:
 1. A clear question text
-2. Multiple choice options (4 choices: A, B, C, D) if applicable
-3. The correct answer
+2. Multiple choice options (4 choices: A, B, C, D)
+3. The correct answer (just the letter)
 4. A brief explanation
 
-Format as JSON array:
-[
-  {
-    "question": "...",
-    "options": ["A: ...", "B: ...", "C: ...", "D: ..."],
-    "answer": "A",
-    "explanation": "..."
-  }
-]
+Format as JSON array with this exact structure:
+[{"question":"...","options":["A: ...","B: ...","C: ...","D: ..."],"answer":"A","explanation":"..."}]
 
-Only output valid JSON, no markdown formatting.`;
+Only output valid JSON, no markdown, no extra text.`;
 
     const response = await this.generate([
-      { role: 'system', content: 'You are a helpful quiz generator. Output only valid JSON.' },
+      { role: 'system', content: 'You are a helpful quiz generator. Output only valid JSON array.' },
       { role: 'user', content: prompt }
     ]);
 
     try {
-      const cleaned = response.replace(/```json\n?|```\n?/g, '').trim();
-      return JSON.parse(cleaned) as QuizQuestion[];
-    } catch {
-      throw new Error(`Failed to parse quiz JSON: ${response}`);
+      // Extract JSON array from response
+      const jsonMatch = response.match(/(\[[\s\S]*\])/);
+      if (!jsonMatch) {
+        throw new Error('No JSON array found in response');
+      }
+      const cleaned = jsonMatch[1].trim();
+      const parsed = JSON.parse(cleaned) as QuizQuestion[];
+
+      // Validate and normalize the quiz
+      return parsed.map(q => ({
+        question: q.question || '',
+        options: Array.isArray(q.options) ? q.options : [],
+        answer: q.answer || 'A',
+        explanation: q.explanation || ''
+      }));
+    } catch (error) {
+      throw new Error(`Failed to parse quiz JSON: ${response.substring(0, 500)}`);
     }
   }
 

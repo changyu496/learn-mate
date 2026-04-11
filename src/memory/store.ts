@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { UserProfile, LearningRecord, ConversationHistory, LearningPlan, Progress, Memory } from './types.js';
+import type { UserProfile, LearningRecord, ConversationHistory, LearningPlan, Progress, Memory, User } from './types.js';
 
 export class MemoryStore {
   private db: Database.Database;
