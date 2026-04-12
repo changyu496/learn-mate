@@ -29,43 +29,87 @@ export class LLMClient {
 
   async generate(messages: Message[]): Promise<string> {
     // Convert messages to Anthropic format
-    const anthropicMessages = messages.map(msg => ({
-      role: msg.role,
-      content: msg.role === 'user' ? [{ type: 'text' as const, text: msg.content }] : msg.content
-    }));
+    // System message should be separate
+    let systemPrompt = '';
+    const anthropicMessages: Array<{ role: string; content: Array<{ type: string; text: string }> }> = [];
 
-    const response = await fetch(`${this.baseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
-        'x-api-id': 'cli'
-      },
-      body: JSON.stringify({
-        model: this.model,
-        max_tokens: 4096,
-        messages: anthropicMessages
-      })
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`LLM API error: ${response.status} - ${error}`);
-    }
-
-    const data = await response.json() as {
-      content?: Array<{ type: string; text?: string }>;
-    };
-
-    if (data.content && Array.isArray(data.content)) {
-      for (const block of data.content) {
-        if (block.type === 'text' && block.text) {
-          return block.text;
-        }
+    for (const msg of messages) {
+      if (msg.role === 'system') {
+        systemPrompt = msg.content;
+      } else {
+        anthropicMessages.push({
+          role: msg.role === 'assistant' ? 'assistant' : 'user',
+          content: [{ type: 'text' as const, text: msg.content }]
+        });
       }
     }
 
-    return '';
+    const retry = async (retries: number, attempt: number = 0): Promise<string> => {
+      try {
+        const requestBody = {
+          model: this.model,
+          max_tokens: 2048,
+          system: systemPrompt,
+          messages: anthropicMessages
+        };
+        console.log(`[LLM] Request #${attempt}: ${JSON.stringify(requestBody).length} chars, system=${systemPrompt.length} chars, ${anthropicMessages.length} messages`);
+
+        const response = await fetch(`${this.baseUrl}/v1/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.apiKey}`,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: this.model,
+            max_tokens: 2048,
+            system: systemPrompt,
+            messages: anthropicMessages
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          console.log(`[LLM] Error response (${response.status}): ${error.substring(0, 500)}`);
+          // Retry on 500, 502, 503, 504 or API error code 1000
+          const isServerError = response.status >= 500 || error.includes('1000') || error.includes('api_error');
+          if (isServerError && retries > 0) {
+            // Exponential backoff with jitter: 1s, 2s, 4s...
+            const delay = Math.min(1000 * Math.pow(2, attempt) + Math.random() * 500, 10000);
+            console.log(`[LLM] Server error (${response.status}), retrying in ${Math.round(delay)}ms... (${retries} retries left)`);
+            await new Promise(r => setTimeout(r, delay));
+            return retry(retries - 1, attempt + 1);
+          }
+          throw new Error(`LLM API error: ${response.status} - ${error}`);
+        }
+
+        const data = await response.json() as {
+          content?: Array<{ type: string; text?: string }>;
+        };
+
+        if (data.content && Array.isArray(data.content)) {
+          for (const block of data.content) {
+            if (block.type === 'text' && block.text) {
+              return block.text;
+            }
+          }
+        }
+
+        return '';
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (retries > 0) {
+          const delay = Math.min(1000 * Math.pow(2, attempt) + Math.random() * 500, 10000);
+          console.log(`[LLM] Network error: ${errorMessage}, retrying in ${Math.round(delay)}ms... (${retries} retries left)`);
+          await new Promise(r => setTimeout(r, delay));
+          return retry(retries - 1, attempt + 1);
+        }
+        throw error;
+      }
+    };
+
+    return retry(5);
   }
 
   async generateQuiz(topic: string, count: number = 3): Promise<QuizQuestion[]> {

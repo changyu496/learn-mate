@@ -42,12 +42,13 @@ export class Learner {
   async startConversation(userId: string): Promise<TeachingResponse> {
     // 检查是否有用户画像
     const profile = this.store.getUserProfile(userId);
+    const history = this.store.getConversationHistory(userId, 'onboarding');
 
-    if (profile) {
-      // 有画像，友好打招呼，继续学习
+    if (profile && history.length > 0) {
+      // 有用户画像和对话历史，说明是老用户
       return {
         type: 'greeting',
-        message: `${profile.name}，欢迎回来！上次我们学到...`
+        message: `${profile.name}，欢迎回来！继续学习吗？`
       };
     }
 
@@ -55,10 +56,11 @@ export class Learner {
     const messages: Message[] = [
       {
         role: 'system',
-        content: `你是一个温暖、专业的 AI 私教。你正在了解一个新用户，准备为他定制学习体验。
-你的风格：友好、鼓励、像朋友聊天一样。
-你现在要通过轻松的对话了解用户：1. 名字 2. 背景/经验 3. 学习目标
-不要一次问太多问题，让对话自然流畅。`
+        content: `你是学生的 AI 私教，教授"Harness 工程"——这是关于如何为 AI Agent 构建可靠执行环境的工程方法论，不是 CI/CD 平台。
+
+风格友好自然，像朋友聊天。问学生：名字、背景、学习目标。不要一次问太多问题。
+
+重要：这个课程教的是如何给 AI coding agent 配"马鞍"（harness），包括指令设计、工具配置、状态管理、验证反馈等工程实践。`
       },
       {
         role: 'user',
@@ -76,48 +78,32 @@ export class Learner {
 
   // 处理用户回复，收集信息直到画像建立完成
   async continueOnboarding(userId: string, userMessage: string): Promise<TeachingResponse> {
-    // 获取对话历史
     const history = this.store.getConversationHistory(userId, 'onboarding');
 
-    // 构建消息
     const messages: Message[] = [
       {
         role: 'system',
-        content: `你是一个温暖、专业的 AI 私教，正在通过对话了解用户。
-当用户告诉你他的信息时，记得更新用户画像。
-收集到以下信息后结束 onboarding：
-- 名字（如果有）
-- 编程经验
-- 是否用过 Agent 工具（LangChain 等）
-- 学习目标
+        content: `你是 AI 私教，教授"Harness 工程"——如何为 AI Agent 构建可靠执行环境的工程方法论。
 
-对话结束后说"好的，我记住了"，并简单总结你了解到的用户信息。`
+通过对话了解学生信息：名字、经验、目标。回复简洁自然。收集完信息后说"好的，我记住了"并总结。
+
+重要：这个课程不是教 CI/CD 的，是教如何给 AI coding agent 配"马鞍"的。`
       }
     ];
 
-    // 添加历史对话
     for (const msg of history) {
-      messages.push({
-        role: msg.role,
-        content: msg.content
-      });
+      messages.push({ role: msg.role, content: msg.content });
     }
-
     messages.push({ role: 'user', content: userMessage });
 
     const response = await this.llm.generate(messages);
 
-    // 保存对话
     this.store.addConversation(userId, 'onboarding', 'user', userMessage);
     this.store.addConversation(userId, 'onboarding', 'assistant', response);
-
-    // 尝试从对话中提取用户信息并更新画像
     await this.updateProfileFromConversation(userId, userMessage, response);
 
-    // 检查是否需要继续 onboarding
     const profile = this.store.getUserProfile(userId);
     if (profile && profile.goals) {
-      // 画像已建立，开始学习
       return {
         type: 'continue',
         message: response + '\n\n准备好了吗？我们开始学习！'
@@ -142,33 +128,24 @@ export class Learner {
       };
     }
 
-    // 保存当前 lecture
     this.store.addConversation(userId, lectureId, 'assistant', `[开始学习: ${lecture.title}]`);
 
-    // 构建教学 prompt
-    const teachingStyle = profile?.teachingStyle || 'friendly';
     const level = profile?.level || 'beginner';
     const language = profile?.preferredLanguage || 'python';
 
-    const systemPrompt = `你是一个专业的 AI 私教，正在教用户学习"${lecture.title}"。
-你的风格：${teachingStyle === 'serious' ? '严谨认真' : teachingStyle === 'encouraging' ? '温暖鼓励' : '轻松友好'}
-用户背景：${level}水平，偏好的语言：${language}
+    const systemPrompt = `你是 AI 私教，教授"Harness 工程"——如何为 AI Agent 构建可靠执行环境的工程方法论。
 
-教学原则：
-1. 不要一次性讲太多，每次只讲一个核心概念
-2. 用用户能理解的类比和例子解释
-3. 讲完一个概念后，问用户问题确认理解
-4. 不要直接给答案，引导用户自己思考
-5. 如果用户答错了，换个角度再解释
+教学生学"${lecture.title}"。用户${level}水平，用${language}。
 
-开始教学，先简单介绍这个 lecture 要讲什么，然后问用户准备好了吗。`;
+重要：这个课程不是教 CI/CD 的，是教如何给 AI coding agent 配"马鞍"的。harness 是"模型权重之外的一切工程基础设施"。
+
+规则：1. 每次只讲一个概念，简短 2. 用类比 3. 讲完问"能用自己的话说说吗"确认理解 4. 不给答案，引导思考`;
 
     const history = this.store.getConversationHistory(userId, lectureId);
     const messages: Message[] = [
       { role: 'system', content: systemPrompt }
     ];
 
-    // 添加历史
     for (const msg of history) {
       messages.push({ role: msg.role, content: msg.content });
     }
@@ -230,17 +207,30 @@ export class Learner {
 
     this.store.addConversation(userId, lectureId, 'user', userMessage);
 
-    const systemPrompt = `用户说"准备好了"或类似的话。
-现在你要讲第一个核心概念。
-规则：
-1. 只讲一个概念，用简短的话（不超过 100 字）
-2. 用类比或例子
-3. 讲完后问用户问题确认理解，格式如："你能用自己的话说说 XXX 是什么意思吗？"
-4. 不要一次讲多个概念`;
+    // 先从课程内容中提取一个核心概念来讲
+    const concept = lecture?.concepts[0] || 'Harness';
+
+    const systemPrompt = `你是 AI 私教，教授"Harness 工程"——如何为 AI Agent 构建可靠执行环境的工程方法论。不是 CI/CD 平台。
+
+风格：**先定义，再解释，最后给例子**。不要一直问问题。
+
+格式：
+1. 先给**定义**（一句话说清楚）
+2. 再给**解释**（为什么重要）
+3. 最后给**例子或类比**（让概念具体化）
+4. 结尾问用户是否想深入或继续下一个概念
+
+不要：
+- 不要连珠炮式提问
+- 不要"我想问"、"你的经验是"这种开场
+- 不要只问问题不给答案`;
 
     const messages: Message[] = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `课程是：${lecture?.title}\n概念：${lecture?.concepts.join(', ')}\n用户说：${userMessage}` }
+      { role: 'user', content: `讲清楚这个概念：**${concept}**
+
+课程标题：${lecture?.title}
+课程内容摘要：${lecture?.content.substring(0, 500)}` }
     ];
 
     const response = await this.llm.generate(messages);
@@ -265,14 +255,16 @@ export class Learner {
     this.store.addConversation(userId, lectureId, 'user', userMessage);
 
     // 判断用户回答是否正确/充分
-    const evaluationPrompt = `用户正在学习"${lecture?.title}"。
+    const evaluationPrompt = `你是 AI 私教，教授"Harness 工程"——如何为 AI Agent 构建可靠执行环境的工程方法论。不是 CI/CD 平台。
+
+用户正在学习"${lecture?.title}"。
 验证类型：${type}
 
 用户回答：
 ${userMessage}
 
 评估标准：
-- 理解：是否抓住了核心概念
+- 理解：是否抓住了核心概念（Harness 是模型之外的工程基础设施，不是 CI/CD）
 - 应用：是否能迁移到实际场景
 - 练习：是否能生成/写代码
 
@@ -320,16 +312,18 @@ ${userMessage}
 
     this.store.addConversation(userId, lectureId, 'user', userMessage);
 
-    const systemPrompt = `你是一个专业的 AI 私教，正在教用户学习"${lecture?.title}"。
-用户正在跟你对话。
+    const systemPrompt = `你是 AI 私教，教授"Harness 工程"——如何为 AI Agent 构建可靠执行环境的工程方法论。不是 CI/CD 平台。
+
+正在教用户学习"${lecture?.title}"。
+
+原则：**先教后问**。用户问什么，就先回答什么（给清晰答案），然后适当延伸。
 
 规则：
-1. 根据用户的回应继续引导
-2. 不要一次给太多信息
-3. 用户有问题就回答，有困惑就解释
-4. 适时问问题确认理解
-5. 用户答对时给予肯定
-6. 对话要自然，像朋友聊天`;
+1. 用户问什么 → 先直接回答
+2. 回答后可以延伸："顺便说一下，这个还涉及到..."
+3. 不要反问太多次
+4. 不要一直追问用户"你怎么看"
+5. 对话要像老师授课，不是苏格拉底式追问`;
 
     const messages: Message[] = [
       { role: 'system', content: systemPrompt }

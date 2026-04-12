@@ -88,18 +88,27 @@ async function interactiveSession(): Promise<void> {
     }
 
     try {
+      // 检测用户是否说"准备好了"等开始学习的关键词
+      const readyKeywords = ['准备好了', '开始学习', '开始吧', '好', '开始', 'ready', 'start'];
+      const isReady = readyKeywords.some(k => userInput.toLowerCase().includes(k.toLowerCase()));
+
       if (inOnboarding) {
         response = await learner.continueOnboarding(userId, userInput);
         console.log('\nTutor:', response.message);
 
         if (response.type === 'continue') {
-          inOnboarding = false;
-          inLearning = true;
-
-          currentLectureId = await learner.getNextLecture(userId);
-          if (currentLectureId) {
-            response = await learner.teach(userId, currentLectureId);
-            console.log('\nTutor:', response.message);
+          if (isReady) {
+            // 用户说准备好了，开始学习
+            inOnboarding = false;
+            inLearning = true;
+            currentLectureId = await learner.getNextLecture(userId);
+            if (currentLectureId) {
+              response = await learner.teach(userId, currentLectureId);
+              console.log('\nTutor:', response.message);
+            }
+          } else {
+            // 等用户说准备好了
+            console.log('\n(Waiting for you to say "ready" or "start" to begin...)\n');
           }
         }
       } else if (inLearning && currentLectureId) {
@@ -121,7 +130,13 @@ async function interactiveSession(): Promise<void> {
         }
       }
     } catch (error) {
-      console.error('\nError:', error instanceof Error ? error.message : error);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('\nError:', message);
+
+      // 如果是 API 错误，让用户重试
+      if (message.includes('API error')) {
+        console.log('\nAPI seems busy. Please try again or type "quit" to exit.\n');
+      }
     }
   }
 
