@@ -10,20 +10,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Not filling users with course content, but **Agent understands course then teaches in the way that fits you best**
 - Long-term: a virtual person that interacts via text, voice, video; knows you, remembers you, grows with you
-- Current MVP: text-based tutor to validate if the learning model works
+- Current MVP: text-based tutor with options-based interaction
 
 ### Core Principles
 
-1. **Mastery Learning** - Must answer correctly to be considered "learned", no skipping verification
-2. **Socratic Teaching** - Guide users to think through questions
-3. **Personalization** - Adjust explanation depth based on user level, preferences, habits
+1. **Mastery Learning** - Must demonstrate understanding before advancing (Mastery Gate)
+2. **Options-Based Interaction** - Use multiple-choice questions to guide user thinking (scaffolding)
+3. **Personalization** - Adjust explanation depth based on user level, preferences
 4. **Memory** - Remember users, grow with them, understand them better over time
 
 ### Education Theory Behind the Design
 
-**Testing Effect** - Self-testing is more effective than repeated reading (retrieval process strengthens memory)
-**Generation Effect** - Answers you generate yourself stick better than passive reception
-**Bloom's Taxonomy** - Remember → Understand → Apply → Analyze → Evaluate → Create
+Based on Claude Code's teach-me skill and pedagogy research:
+
+- **Testing Effect** - Self-testing is more effective than repeated reading
+- **Generation Effect** - Answers you generate yourself stick better than passive reception
+- **Bloom's Taxonomy** - Remember → Understand → Apply → Analyze → Evaluate → Create
+- **AskUserQuestion Pattern** - Options serve as thinking scaffolds, not just convenience
 
 ## Commands
 
@@ -45,81 +48,80 @@ npx vitest      # Run tests (Vitest)
 | Component | File | Responsibility |
 |-----------|------|----------------|
 | `Learner` | `src/agent/learner.ts` | AI tutor logic - onboarding, teaching, three-layer verification |
+| `QuestionGenerator` | `src/agent/questionGenerator.ts` | LLM-generated multiple-choice questions (teach-me pattern) |
 | `LLMClient` | `src/llm/client.ts` | MiniMax API wrapper with 5 retries and exponential backoff |
-| `MemoryStore` | `src/memory/store.ts` | SQLite persistence for users, profiles, learning records, conversations |
+| `MemoryStore` | `src/memory/store.ts` | SQLite persistence for users, profiles, conversations, TeachingState |
 | `Course` | `src/curriculum/course.ts` | Lecture management and progress tracking |
-| `Scheduler` | `src/notifier/scheduler.ts` | Daily reminder scheduling |
+| `CLI` | `src/cli/index.ts` | Interactive readline interface with options mode |
+
+### New Interaction Pattern (Options-Based)
+
+**Old flow:** User free-form input → hardcoded keyword matching → execute
+
+**New flow (teach-me pattern):**
+```
+展示选项 → 用户选择（数字或文字） → 意图明确 → 直接执行
+```
+
+**Key files for the new pattern:**
+- `src/agent/questionGenerator.ts` - Generates options using LLM
+- `src/agent/learner.ts` - `executeChoice()` method handles option selections
+- `src/cli/index.ts` - `displayOptions()` and `parseChoice()` for options UI
 
 ### Data Flow
 
-1. CLI (`src/cli/index.ts`) handles interactive input via readline
-2. `Learner` orchestrates tutoring with LLM calls through `LLMClient`
-3. All user data persisted via `MemoryStore` to SQLite at `~/.learn-mate/data/learn-mate.db`
-
-### Three-Layer Verification (in `Learner.verifyUnderstanding`)
-
-1. **理解 (Understanding)** - After teaching a concept, ask "能用自己话说说吗？" - verify core concept grasp
-2. **应用 (Application)** - Ask "设计一个..." scenario question - verify transfer to real scenarios
-3. **练习 (Micro-exercise)** - Give "小练习/写一段" task - verify can generate/write code
-
-Dynamic adjustment based on performance:
-- Smooth answers → accelerate, teach multiple concepts at once
-- Hesitation → slow down, give more examples
-- Wrong answer → re-explain from different angle
-- Correct answer → praise + go deeper
-
-### Key Patterns
-
-- Messages format: `{ role: 'system' | 'user' | 'assistant', content: string }`
-- Learner responds with `TeachingResponse` type: `{ type, message, question?, teachingPoint? }`
-- System prompts define tutor personality and rules (Chinese language, friendly tone)
-- Profile updates via simple pattern matching in `updateProfileFromConversation`
-
-### Learning Flow
-
 ```
-1. Onboarding conversation
-   → Agent learns user background, goals, preferences via conversation
-   → Build user profile, save to memory
+CLI Input → Learner.respond() / Learner.executeChoice()
+                    ↓
+            QuestionGenerator (if options needed)
+                    ↓
+                  LLM → generate options
+                    ↓
+              TeachingResponse { type: 'options', options: [...] }
+                    ↓
+              CLI displays options, user selects
+                    ↓
+            Learner.executeChoice(choice.value)
+```
 
-2. Knowledge point learning (loop)
-   a) Agent digests course content, explains in own words
-   b) Adjust explanation depth based on user level (step-by-step, don't overwhelm)
-   c) Use questions instead of statements, guide user to think
-   d) Verify understanding: ask questions or have user explain back
-   e) If wrong: re-explain from different angle until truly mastered
-   f) Move to next knowledge point
+### TeachingResponse Types
 
-3. Continuous memory
-   - Remember what user learned, got wrong, weak points
-   - Next session automatically review weak points
-   - Continuously observe user habits, optimize explanation style
+```typescript
+type TeachingResponse = {
+  type: 'greeting' | 'teach' | 'question' | 'correct' | 'incorrect' | 'continue' | 'options';
+  message: string;
+  options?: QuestionOption[];  // For options type
+  teachingPoint?: TeachingPoint;
+};
+```
+
+### QuestionOption Format
+
+```typescript
+interface QuestionOption {
+  label: string;      // Display text (e.g., "概念1：xxx")
+  description: string; // Hint/context (e.g., "继续学习下一个概念")
+  value: string;      // Internal value (e.g., "concept:1")
+}
 ```
 
 ## Course Content
 
-Lecture files are markdown documents in `/reference/learn-harness-engineering/docs/zh/lectures/` with 12 lectures covering AI agent harness engineering topics (instruction design, tool configuration, state management, verification feedback).
+Lecture files are markdown documents in `/reference/learn-harness-engineering/docs/zh/lectures/` with 12 lectures covering AI agent harness engineering topics.
 
-**Important:** This course teaches how to equip AI coding agents with "harnesses" (model weight之外的工程基础设施), NOT CI/CD platforms.
-
-## Current Status & Known Issues
-
-### Recent Fix (2026-04-11)
-**Problem:** AI confused "Harness Engineering" with CI/CD platforms
-**Cause:** System prompt didn't clearly specify course content, LLM answered from training knowledge
-**Fix:** Added explicit clarification in prompts for:
-- `startConversation`, `continueOnboarding`, `teach`, `teachNextConcept`, `verifyUnderstanding`, `continueTeaching`
-
-### API Issue
-MiniMax API may return 500 errors with `unknown error (1000)`. If LLM calls fail:
-- Check API key validity
-- Check MiniMax API quotas
-- Consider switching models or checking API endpoint
+Lecture structure:
+- `narrative` - Story introduction and background
+- `teachingPoints` - Core concepts extracted from "## 核心概念" section
+- `keyTakeaways` - Key points from "## 关键要点" section
 
 ## Reference Documents
 
 Design documents are stored in `docs/superpowers/`:
-- `specs/2026-04-11-learnmate-mvp-design.md` - Full design spec with education theory
+- `specs/2026-04-11-learnmate-mvp-design.md` - Full design spec
 - `plans/2026-04-11-learnmate-mvp-implementation-plan-v2.md` - Implementation plan
+
+Claude Code's teach-me skill reference:
+- `.claude/skills/teach-me/SKILL.md` - teach-me skill definition
+- `.claude/skills/teach-me/references/pedagogy.md` - Pedagogy theory
 
 Session context is in `SESSION_SUMMARY.md` at repo root.

@@ -1,4 +1,4 @@
-import { CurriculumParser, type Lecture } from './parser.js';
+import { CurriculumParser, type Lecture, type LectureWithPoints } from './parser.js';
 import type { LearningPlan } from '../memory/types.js';
 
 export interface CourseNode {
@@ -53,5 +53,9 @@ export class Course {
     const current = this.lectures.find(l => l.id === currentLectureId);
     if (!current) return undefined;
     return this.lectures.find(l => l.order === current.order + 1);
+  }
+
+  async getLectureWithTeachingPoints(lectureId: string): Promise<LectureWithPoints | null> {
+    return this.parser.getLectureWithTeachingPoints(lectureId);
   }
 }

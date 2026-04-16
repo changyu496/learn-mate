@@ -1,20 +1,17 @@
 import { MemoryStore } from '../memory/store.js';
 import { LLMClient, type Message } from '../llm/client.js';
 import { Course } from '../curriculum/course.js';
-import type { UserProfile, LearningRecord, ConversationHistory } from '../memory/types.js';
+import type { UserProfile, LearningRecord } from '../memory/types.js';
+import type { LectureWithPoints } from '../curriculum/parser.js';
+import { QuestionGenerator, type QuestionOption, type TeachingPoint } from './questionGenerator.js';
 
-export interface TeachingPoint {
-  concept: string;
-  explanation: string;
-  example: string;
-  question: string;
-}
+export type { TeachingPoint };
 
 export interface TeachingResponse {
-  type: 'greeting' | 'teach' | 'question' | 'feedback' | 'praise' | 'correct' | 'incorrect' | 'continue';
+  type: 'greeting' | 'teach' | 'question' | 'feedback' | 'praise' | 'correct' | 'incorrect' | 'continue' | 'options';
   message: string;
   question?: string;
-  options?: string[];
+  options?: QuestionOption[];  // 选项式响应
   teachingPoint?: TeachingPoint;
   understood?: boolean;
 }
@@ -31,11 +28,13 @@ export class Learner {
   private store: MemoryStore;
   private llm: LLMClient;
   private course: Course;
+  private questionGenerator: QuestionGenerator;
 
   constructor(store: MemoryStore, llm: LLMClient, course: Course) {
     this.store = store;
     this.llm = llm;
     this.course = course;
+    this.questionGenerator = new QuestionGenerator(llm);
   }
 
   // 入课对话 - 了解用户，建立画像
@@ -116,130 +115,173 @@ export class Learner {
     };
   }
 
-  // 开始/继续学习某个 lecture
+  // 开始/继续学习某个 lecture - 展示概念列表选项
   async teach(userId: string, lectureId: string): Promise<TeachingResponse> {
     const profile = this.store.getUserProfile(userId);
-    const lecture = this.course.getLecture(lectureId);
+    const lectureWithPoints = await this.course.getLectureWithTeachingPoints(lectureId);
 
-    if (!lecture) {
+    if (!lectureWithPoints) {
       return {
         type: 'incorrect',
         message: `找不到课程: ${lectureId}`
       };
     }
 
-    this.store.addConversation(userId, lectureId, 'assistant', `[开始学习: ${lecture.title}]`);
+    this.store.addConversation(userId, lectureId, 'assistant', `[开始学习: ${lectureWithPoints.title}]`);
 
-    const level = profile?.level || 'beginner';
-    const language = profile?.preferredLanguage || 'python';
+    // 生成概念列表选项
+    const question = await this.questionGenerator.generateConceptListOptions(lectureWithPoints);
 
-    const systemPrompt = `你是 AI 私教，教授"Harness 工程"——如何为 AI Agent 构建可靠执行环境的工程方法论。
-
-教学生学"${lecture.title}"。用户${level}水平，用${language}。
-
-重要：这个课程不是教 CI/CD 的，是教如何给 AI coding agent 配"马鞍"的。harness 是"模型权重之外的一切工程基础设施"。
-
-规则：1. 每次只讲一个概念，简短 2. 用类比 3. 讲完问"能用自己的话说说吗"确认理解 4. 不给答案，引导思考`;
-
-    const history = this.store.getConversationHistory(userId, lectureId);
-    const messages: Message[] = [
-      { role: 'system', content: systemPrompt }
-    ];
-
-    for (const msg of history) {
-      messages.push({ role: msg.role, content: msg.content });
-    }
-
-    const response = await this.llm.generate(messages);
-    this.store.addConversation(userId, lectureId, 'assistant', response);
+    // 保存当前教学状态
+    this.store.setTeachingState(userId, {
+      lectureId,
+      conceptIndex: 0,
+      phase: 'introduce'
+    });
 
     return {
-      type: 'teach',
-      message: response,
-      teachingPoint: {
-        concept: lecture.title,
-        explanation: lecture.content,
-        example: '',
-        question: ''
-      }
+      type: 'options',
+      message: `## ${lectureWithPoints.title}\n\n${(lectureWithPoints.narrative || '').split('\n')[0] || ''}\n\n这节课包含 ${lectureWithPoints.teachingPoints.length} 个概念，请选择一个开始学习：`,
+      options: question.options,
+      teachingPoint: lectureWithPoints.teachingPoints[0]
     };
   }
 
-  // 处理用户的回应，进行三层验证
-  async respond(userId: string, lectureId: string, userMessage: string): Promise<TeachingResponse> {
-    const profile = this.store.getUserProfile(userId);
-    const history = this.store.getConversationHistory(userId, lectureId);
-
-    // 检查是否是第一轮（打招呼后的回应）
-    const isFirstResponse = history.length <= 2;
-
-    if (isFirstResponse) {
-      // 用户说准备好了，开始讲第一个概念
-      return this.teachNextConcept(userId, lectureId, userMessage);
+  // 执行用户选择 - 核心方法，根据选项值执行对应动作
+  async executeChoice(userId: string, choice: string): Promise<TeachingResponse> {
+    const state = this.store.getTeachingState(userId);
+    if (!state) {
+      return {
+        type: 'incorrect',
+        message: '教学状态丢失，请重新开始'
+      };
     }
 
-    // 检查用户是否在回答问题
+    // 解析选择值
+    if (choice.startsWith('concept:')) {
+      // 用户选择学习某个概念
+      const index = parseInt(choice.split(':')[1], 10);
+      return this.teachConcept(userId, state.lectureId, index);
+    }
+
+    if (choice === 'next') {
+      // 继续下一个概念
+      return this.teachNextConcept(userId, state.lectureId, state.conceptIndex);
+    }
+
+    if (choice === 'review') {
+      // 回顾当前概念
+      return this.teachConcept(userId, state.lectureId, state.conceptIndex);
+    }
+
+    if (choice === 'ask') {
+      // 用户想提问
+      return this.continueTeaching(userId, state.lectureId, '');
+    }
+
+    if (choice === 'continue') {
+      // 继续对话
+      return this.continueTeaching(userId, state.lectureId, '');
+    }
+
+    if (choice === 'exit') {
+      // 退出学习
+      return {
+        type: 'continue',
+        message: '好的，下次继续！'
+      };
+    }
+
+    // 默认继续对话
+    return this.continueTeaching(userId, state.lectureId, choice);
+  }
+
+  // 讲某个概念
+  async teachConcept(userId: string, lectureId: string, conceptIndex: number): Promise<TeachingResponse> {
+    const profile = this.store.getUserProfile(userId);
+    const lectureWithPoints = await this.course.getLectureWithTeachingPoints(lectureId);
+
+    if (!lectureWithPoints) {
+      return {
+        type: 'incorrect',
+        message: `找不到课程: ${lectureId}`
+      };
+    }
+
+    if (conceptIndex >= lectureWithPoints.teachingPoints.length) {
+      conceptIndex = 0;
+    }
+
+    const teachingPoint = lectureWithPoints.teachingPoints[conceptIndex];
+
+    // 保存当前教学状态
+    this.store.setTeachingState(userId, {
+      lectureId,
+      conceptIndex,
+      phase: 'introduce'
+    });
+
+    // 生成介绍问题（选项式）
+    const question = await this.questionGenerator.generateIntroduceQuestion(
+      teachingPoint,
+      profile?.name
+    );
+
+    const total = lectureWithPoints.teachingPoints.length;
+    const remaining = total - conceptIndex - 1;
+
+    return {
+      type: 'options',
+      message: `## 概念 ${conceptIndex + 1}/${total}：${teachingPoint.concept}\n\n${teachingPoint.explanation}${remaining > 0 ? `\n\n（共 ${total} 个概念，还剩 ${remaining} 个）` : '\n\n（最后一个概念 🎉）'}`,
+      options: question.options,
+      teachingPoint
+    };
+  }
+
+  // 讲下一个概念
+  async teachNextConcept(userId: string, lectureId: string, currentIndex: number): Promise<TeachingResponse> {
+    const lectureWithPoints = await this.course.getLectureWithTeachingPoints(lectureId);
+
+    if (!lectureWithPoints) {
+      return {
+        type: 'incorrect',
+        message: `找不到课程: ${lectureId}`
+      };
+    }
+
+    const nextIndex = currentIndex + 1;
+    if (nextIndex >= lectureWithPoints.teachingPoints.length) {
+      // 已经讲完所有概念
+      return {
+        type: 'teach',
+        message: '🎉 这节课的所有概念都学完了！\n\n你可以：\n- 说"继续下一课"学习下一节\n- 说"我想回顾"复习刚才学的\n- 或者问我任何问题'
+      };
+    }
+
+    return this.teachConcept(userId, lectureId, nextIndex);
+  }
+
+  // 处理用户的回应
+  async respond(userId: string, lectureId: string, userMessage: string): Promise<TeachingResponse> {
+    const history = this.store.getConversationHistory(userId, lectureId);
+
+    // 检查是否在回答验证问题
     const lastAssistantMsg = history.filter(m => m.role === 'assistant').pop();
 
     if (lastAssistantMsg?.content.includes('用自己的话')) {
-      // 第一层验证：理解检查
       return this.verifyUnderstanding(userId, lectureId, userMessage, '理解');
     }
 
     if (lastAssistantMsg?.content.includes('设计一个')) {
-      // 第二层验证：应用检查
       return this.verifyUnderstanding(userId, lectureId, userMessage, '应用');
     }
 
     if (lastAssistantMsg?.content.includes('小练习') || lastAssistantMsg?.content.includes('写一段')) {
-      // 第三层验证：微练习
       return this.verifyUnderstanding(userId, lectureId, userMessage, '练习');
     }
 
     // 继续对话
     return this.continueTeaching(userId, lectureId, userMessage);
-  }
-
-  // 讲下一个概念
-  private async teachNextConcept(userId: string, lectureId: string, userMessage: string): Promise<TeachingResponse> {
-    const profile = this.store.getUserProfile(userId);
-    const lecture = this.course.getLecture(lectureId);
-
-    this.store.addConversation(userId, lectureId, 'user', userMessage);
-
-    // 先从课程内容中提取一个核心概念来讲
-    const concept = lecture?.concepts[0] || 'Harness';
-
-    const systemPrompt = `你是 AI 私教，教授"Harness 工程"——如何为 AI Agent 构建可靠执行环境的工程方法论。不是 CI/CD 平台。
-
-风格：**先定义，再解释，最后给例子**。不要一直问问题。
-
-格式：
-1. 先给**定义**（一句话说清楚）
-2. 再给**解释**（为什么重要）
-3. 最后给**例子或类比**（让概念具体化）
-4. 结尾问用户是否想深入或继续下一个概念
-
-不要：
-- 不要连珠炮式提问
-- 不要"我想问"、"你的经验是"这种开场
-- 不要只问问题不给答案`;
-
-    const messages: Message[] = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: `讲清楚这个概念：**${concept}**
-
-课程标题：${lecture?.title}
-课程内容摘要：${lecture?.content.substring(0, 500)}` }
-    ];
-
-    const response = await this.llm.generate(messages);
-    this.store.addConversation(userId, lectureId, 'assistant', response);
-
-    return {
-      type: 'teach',
-      message: response
-    };
   }
 
   // 验证理解（三层）
@@ -249,22 +291,31 @@ export class Learner {
     userMessage: string,
     type: '理解' | '应用' | '练习'
   ): Promise<TeachingResponse> {
-    const profile = this.store.getUserProfile(userId);
-    const lecture = this.course.getLecture(lectureId);
+    const state = this.store.getTeachingState(userId);
+    const lectureWithPoints = await this.course.getLectureWithTeachingPoints(lectureId);
 
     this.store.addConversation(userId, lectureId, 'user', userMessage);
+
+    if (!lectureWithPoints || !state) {
+      return {
+        type: 'incorrect',
+        message: '状态丢失'
+      };
+    }
+
+    const teachingPoint = lectureWithPoints.teachingPoints[state.conceptIndex];
 
     // 判断用户回答是否正确/充分
     const evaluationPrompt = `你是 AI 私教，教授"Harness 工程"——如何为 AI Agent 构建可靠执行环境的工程方法论。不是 CI/CD 平台。
 
-用户正在学习"${lecture?.title}"。
+用户正在学习"${lectureWithPoints.title}" - "${teachingPoint.concept}"
 验证类型：${type}
 
 用户回答：
 ${userMessage}
 
 评估标准：
-- 理解：是否抓住了核心概念（Harness 是模型之外的工程基础设施，不是 CI/CD）
+- 理解：是否抓住了核心概念
 - 应用：是否能迁移到实际场景
 - 练习：是否能生成/写代码
 
@@ -278,14 +329,12 @@ ${userMessage}
       { role: 'system', content: evaluationPrompt }
     ]);
 
-    // 判断是否理解（简化判断，实际可以用 LLM 判断）
+    // 判断是否理解（简化判断）
     const understood = !response.includes('不太对') && !response.includes('有点偏差') && !response.includes('再想想');
 
     if (understood) {
-      // 记录进步
       this.store.createOrUpdateLearningRecord(userId, lectureId);
     } else {
-      // 记录薄弱点
       const lastQuestion = this.store.getConversationHistory(userId, lectureId)
         .filter(m => m.role === 'assistant')
         .pop();
@@ -297,9 +346,17 @@ ${userMessage}
 
     this.store.addConversation(userId, lectureId, 'assistant', response);
 
+    // 生成下一个选项
+    const nextQuestion = await this.questionGenerator.generateNextConceptOptions(
+      state.conceptIndex,
+      lectureWithPoints.teachingPoints.length,
+      lectureWithPoints.teachingPoints.slice(state.conceptIndex + 1)
+    );
+
     return {
       type: understood ? 'correct' : 'incorrect',
       message: response,
+      options: nextQuestion.options,
       understood
     };
   }
@@ -310,7 +367,9 @@ ${userMessage}
     const lecture = this.course.getLecture(lectureId);
     const history = this.store.getConversationHistory(userId, lectureId);
 
-    this.store.addConversation(userId, lectureId, 'user', userMessage);
+    if (userMessage) {
+      this.store.addConversation(userId, lectureId, 'user', userMessage);
+    }
 
     const systemPrompt = `你是 AI 私教，教授"Harness 工程"——如何为 AI Agent 构建可靠执行环境的工程方法论。不是 CI/CD 平台。
 
@@ -344,7 +403,6 @@ ${userMessage}
 
   // 从对话中更新用户画像
   private async updateProfileFromConversation(userId: string, userMessage: string, assistantResponse: string): Promise<void> {
-    // 简单的模式匹配，实际可以用 LLM 来提取
     const nameMatch = userMessage.match(/我叫(.+?)[，,]|\s名字是(.+?)[，,]/);
     const languageMatch = userMessage.match(/java|python|javascript|go/i);
     const levelMatch = userMessage.match(/一年|两年|三年|新手|有经验|初学者/i);
@@ -374,7 +432,6 @@ ${userMessage}
     }
 
     if (Object.keys(updates).length > 0) {
-      // 检查是否有用户
       let profile = this.store.getUserProfile(userId);
       if (!profile) {
         this.store.createUserProfile(userId, 'Learner');
@@ -402,7 +459,7 @@ ${userMessage}
       total,
       currentLecture,
       weakPoints,
-      learningStreak: 0 // 后续实现
+      learningStreak: 0
     };
   }
 

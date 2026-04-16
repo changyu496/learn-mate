@@ -71,3 +71,11 @@ export interface Memory {
   value: string;
   createdAt: Date;
 }
+
+// 当前教学状态（用于在选项模式中追踪用户选择）
+export interface TeachingState {
+  lectureId: string;
+  conceptIndex: number;
+  phase: 'introduce' | 'verify' | 'practice' | 'mastery';
+  lastQuestionType?: string;
+}

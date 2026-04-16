@@ -19,6 +19,8 @@ export interface Lecture {
   content: string;
   concepts: string[];
   order: number;
+  narrative?: string;      // 故事引入和解释性叙述
+  keyTakeaways?: string[];  // 关键要点总结
 }
 
 import * as fs from 'fs';
@@ -73,6 +75,8 @@ export class CurriculumParser {
       title: this.extractTitle(content),
       content: this.extractCoreContent(content),
       concepts: this.extractConcepts(content),
+      narrative: this.extractNarrative(content),
+      keyTakeaways: this.extractKeyTakeaways(content),
       order: lectureMeta?.order || 0
     };
   }
@@ -130,6 +134,39 @@ export class CurriculumParser {
     return concepts;
   }
 
+  // 提取故事引入和解释性叙述（问题背景、解决方案思路）
+  private extractNarrative(markdown: string): string {
+    // 提取从开头到"## 核心概念"之前的内容作为叙述
+    // 兼容 markdown 开头有元数据链接的情况
+    const match = markdown.match(/(^#\s+.+[\s\S]*?)(?=## 核心概念)/m);
+    if (match) {
+      let narrative = match[1].trim();
+      // 移除链接引用
+      narrative = narrative.replace(/\[English Version.*?\]\(.*?\)/g, '');
+      narrative = narrative.replace(/本篇代码示例.*?\n>/g, '');
+      narrative = narrative.replace(/实战练习.*?\n>/g, '');
+      return narrative.trim();
+    }
+    return '';
+  }
+
+  // 提取关键要点（## 关键要点章节的内容）
+  private extractKeyTakeaways(markdown: string): string[] {
+    const takeaways: string[] = [];
+    const sectionMatch = markdown.match(/## 关键要点\n\n([\s\S]*?)(?=\n## |$)/);
+
+    if (sectionMatch) {
+      const content = sectionMatch[1];
+      // 提取列表项（- 开头的行）
+      const bulletMatches = content.matchAll(/[-*]\s+(.+)/g);
+      for (const match of bulletMatches) {
+        takeaways.push(match[1].trim());
+      }
+    }
+
+    return takeaways;
+  }
+
   async getLectureWithTeachingPoints(lectureId: string): Promise<LectureWithPoints | null> {
     const lecture = await this.getLecture(lectureId);
     if (!lecture) return null;
@@ -145,14 +182,23 @@ export class CurriculumParser {
   }
 
   private extractTeachingPoints(content: string, concepts: string[]): TeachingPoint[] {
-    // 根据概念列表生成讲解要点
-    // 实际实现中，这些数据可能来自课程文件中的特定标记
-    return concepts.map(concept => ({
-      concept,
-      explanation: '',  // LLM 会根据 concept 生成
-      example: '',      // LLM 会根据 concept 生成
-      question: `你能用自己的话说说"${concept}"是什么意思吗？`
-    }));
+    // 从概念列表中解析出 teaching points
+    // concepts 格式："概念名：定义"
+    return concepts.map(conceptEntry => {
+      const colonIndex = conceptEntry.indexOf('：');
+      const concept = colonIndex > 0 ? conceptEntry.substring(0, colonIndex) : conceptEntry;
+      const explanation = colonIndex > 0 ? conceptEntry.substring(colonIndex + 1) : '';
+
+      // 生成验证问题（第一层：理解检查）
+      const question = `你能用自己的话说说"${concept}"是什么意思吗？`;
+
+      return {
+        concept,
+        explanation,
+        example: '',  // 例子从正文中查找，这里先留空
+        question
+      };
+    });
   }
 }
 
@@ -169,6 +215,8 @@ export interface LectureWithPoints {
   title: string;
   content: string;
   concepts: string[];
+  narrative?: string;       // 故事引入和解释性叙述
+  keyTakeaways?: string[];  // 关键要点
   order: number;
   teachingPoints: TeachingPoint[];
 }

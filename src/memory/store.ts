@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { UserProfile, LearningRecord, ConversationHistory, LearningPlan, Progress, Memory, User } from './types.js';
+import type { UserProfile, LearningRecord, ConversationHistory, LearningPlan, Progress, Memory, User, TeachingState } from './types.js';
 
 export class MemoryStore {
   private db: Database.Database;
@@ -408,6 +408,20 @@ export class MemoryStore {
     `);
     const row = stmt.get(userId) as { lecture_id: string } | undefined;
     return row?.lecture_id || null;
+  }
+
+  // TeachingState 操作
+  setTeachingState(userId: string, state: TeachingState): void {
+    this.setMemory(userId, 'teaching_state', state);
+  }
+
+  getTeachingState(userId: string): TeachingState | null {
+    return this.getMemory<TeachingState>(userId, 'teaching_state');
+  }
+
+  clearTeachingState(userId: string): void {
+    const stmt = this.db.prepare('DELETE FROM memory WHERE user_id = ? AND key = ?');
+    stmt.run(userId, 'teaching_state');
   }
 
   close(): void {

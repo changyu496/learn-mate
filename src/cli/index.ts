@@ -7,6 +7,7 @@ import { MemoryStore } from '../memory/store.js';
 import { LLMClient } from '../llm/client.js';
 import { Course } from '../curriculum/course.js';
 import { Learner } from '../agent/learner.js';
+import type { QuestionOption } from '../agent/questionGenerator.js';
 
 const HOME_DIR = process.env.HOME || process.env.USERPROFILE || '.';
 const DATA_DIR = path.join(HOME_DIR, '.learn-mate', 'data');
@@ -54,6 +55,46 @@ async function askQuestion(rl: readline.Interface, prompt: string): Promise<stri
   });
 }
 
+// 显示选项列表
+function displayOptions(options: QuestionOption[]): void {
+  console.log('\n请选择：\n');
+  options.forEach((opt, i) => {
+    console.log(`  ${i + 1}. ${opt.label}`);
+    if (opt.description) {
+      console.log(`     ${opt.description}`);
+    }
+  });
+  console.log();
+}
+
+// 解析用户选择
+function parseChoice(userInput: string, options: QuestionOption[]): QuestionOption | null {
+  // 先尝试匹配数字
+  const num = parseInt(userInput.trim(), 10);
+  if (!isNaN(num) && num >= 1 && num <= options.length) {
+    return options[num - 1];
+  }
+
+  // 尝试匹配选项值
+  const lowerInput = userInput.toLowerCase().trim();
+  for (const opt of options) {
+    if (
+      opt.label.toLowerCase().includes(lowerInput) ||
+      opt.value.toLowerCase().includes(lowerInput)
+    ) {
+      return opt;
+    }
+  }
+
+  // 没找到匹配，返回 null
+  return null;
+}
+
+// 显示消息
+function displayMessage(message: string): void {
+  console.log('\nTutor:', message);
+}
+
 async function interactiveSession(): Promise<void> {
   await ensureInitialized();
 
@@ -63,18 +104,17 @@ async function interactiveSession(): Promise<void> {
   const userId = 'default-user';
 
   console.log('\n=== LearnMate - Your AI Tutor ===\n');
-  console.log('Type your responses to chat with me. Type "quit" to exit.\n');
+  console.log('输入选项数字或文字选择，或直接输入内容与我对话。输入 "quit" 退出。\n');
 
   // Start conversation
   let response = await learner.startConversation(userId);
-  console.log(response.message);
-  console.log();
+  displayMessage(response.message);
 
-  // Onboarding loop
-  let inOnboarding = true;
-  let inLearning = false;
-  let currentLectureId: string | null = null;
+  // Options mode state
+  let inOptionsMode = false;
+  let currentOptions: QuestionOption[] = [];
 
+  // Main loop
   while (true) {
     const userInput = await askQuestion(rl, '\nYou: ');
 
@@ -88,52 +128,67 @@ async function interactiveSession(): Promise<void> {
     }
 
     try {
-      // 检测用户是否说"准备好了"等开始学习的关键词
-      const readyKeywords = ['准备好了', '开始学习', '开始吧', '好', '开始', 'ready', 'start'];
-      const isReady = readyKeywords.some(k => userInput.toLowerCase().includes(k.toLowerCase()));
+      // 如果在选项模式
+      if (inOptionsMode && currentOptions.length > 0) {
+        const choice = parseChoice(userInput, currentOptions);
 
-      if (inOnboarding) {
-        response = await learner.continueOnboarding(userId, userInput);
-        console.log('\nTutor:', response.message);
+        if (choice) {
+          // 执行用户选择
+          response = await learner.executeChoice(userId, choice.value);
+        } else {
+          // 用户输入无法识别，当作对话处理
+          response = await learner.respond(userId, store.getTeachingState(userId)?.lectureId || '', userInput);
+        }
+      } else {
+        // 正常对话模式
+        response = await learner.respond(userId, store.getTeachingState(userId)?.lectureId || '', userInput);
+      }
 
-        if (response.type === 'continue') {
-          if (isReady) {
-            // 用户说准备好了，开始学习
-            inOnboarding = false;
-            inLearning = true;
-            currentLectureId = await learner.getNextLecture(userId);
-            if (currentLectureId) {
-              response = await learner.teach(userId, currentLectureId);
-              console.log('\nTutor:', response.message);
+      // 处理响应
+      if (response.type === 'options' && response.options && response.options.length > 0) {
+        // 进入选项模式
+        inOptionsMode = true;
+        currentOptions = response.options;
+        displayMessage(response.message);
+        displayOptions(currentOptions);
+      } else if (response.type === 'continue') {
+        // 检查是否准备好开始学习
+        const readyKeywords = ['准备好了', '开始学习', '开始吧', 'ready', 'start'];
+        const isReady = readyKeywords.some(k => userInput.toLowerCase().includes(k.toLowerCase()));
+
+        if (isReady) {
+          // 开始学习
+          const lectureId = await learner.getNextLecture(userId);
+          if (lectureId) {
+            response = await learner.teach(userId, lectureId);
+            if (response.type === 'options' && response.options) {
+              inOptionsMode = true;
+              currentOptions = response.options;
+              displayMessage(response.message);
+              displayOptions(currentOptions);
+            } else {
+              displayMessage(response.message);
+              inOptionsMode = false;
+              currentOptions = [];
             }
-          } else {
-            // 等用户说准备好了
-            console.log('\n(Waiting for you to say "ready" or "start" to begin...)\n');
+            continue;
           }
         }
-      } else if (inLearning && currentLectureId) {
-        response = await learner.respond(userId, currentLectureId, userInput);
-        console.log('\nTutor:', response.message);
 
-        if (response.type === 'continue' || response.message.includes('next')) {
-          const nextLecture = await learner.getNextLecture(userId);
-          if (nextLecture && nextLecture !== currentLectureId) {
-            currentLectureId = nextLecture;
-            response = await learner.teach(userId, currentLectureId);
-            console.log('\nTutor:', response.message);
-          } else {
-            console.log('\n=== Congratulations! Course Complete! ===\n');
-            const progress = await learner.getProgress(userId);
-            console.log('Progress: ' + progress.completed + '/' + progress.total + ' lectures mastered\n');
-            break;
-          }
-        }
+        // 显示继续消息
+        displayMessage(response.message);
+        inOptionsMode = false;
+        currentOptions = [];
+      } else {
+        // 普通消息
+        displayMessage(response.message);
+        inOptionsMode = false;
+        currentOptions = [];
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('\nError:', message);
 
-      // 如果是 API 错误，让用户重试
       if (message.includes('API error')) {
         console.log('\nAPI seems busy. Please try again or type "quit" to exit.\n');
       }
