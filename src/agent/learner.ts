@@ -319,13 +319,43 @@ export class Learner {
       // 直接返回下一组选项让用户选下一个概念
       return this.teachNextConcept(userId, lectureId, state.conceptIndex);
     } else if (userMessage === 'need_example') {
-      // 用户选择了"有点模糊，需要例子"
-      response = `好，我举个例子来说明 ${teachingPoint.concept}...` +
-        `\n\n${teachingPoint.example || `比如，${teachingPoint.concept} 可以想象成...`}`;
+      // 用户选择了"有点模糊，需要例子"，用 LLM 生成具体例子
+      this.store.addConversation(userId, lectureId, 'user', userMessage);
+
+      const examplePrompt = `你是 AI 私教，教授"Harness 工程"——如何为 AI Agent 构建可靠执行环境的工程方法论。
+
+概念：${teachingPoint.concept}
+定义：${teachingPoint.explanation}
+
+请给出一个具体的、日常场景中的例子来解释这个概念。
+格式要求：
+1. 先用一句话说明例子是什么
+2. 再解释这个例子和概念的关联
+
+回复要简短，50字以内。`;
+
+      response = await this.llm.generate([{ role: 'system', content: examplePrompt }]);
+      this.store.addConversation(userId, lectureId, 'assistant', response);
       understood = false;
     } else if (userMessage === 'not_understand') {
-      // 用户选择了"完全不懂"
-      response = `没关系，我换个角度来说。${teachingPoint.concept} 的核心意思是...`;
+      // 用户选择了"完全不懂"，用 LLM 换角度解释
+      this.store.addConversation(userId, lectureId, 'user', userMessage);
+
+      const explainPrompt = `你是 AI 私教，教授"Harness 工程"。
+
+概念：${teachingPoint.concept}
+定义：${teachingPoint.explanation}
+
+用户说完全不懂，请换一个新的角度来解释这个概念。
+要求：
+1. 用完全不同的比喻或类比
+2. 不要重复之前的解释
+3. 要更简单、更直观
+
+回复要简短，60字以内。`;
+
+      response = await this.llm.generate([{ role: 'system', content: explainPrompt }]);
+      this.store.addConversation(userId, lectureId, 'assistant', response);
       understood = false;
     } else {
       // 其他情况，当作自由回答处理
