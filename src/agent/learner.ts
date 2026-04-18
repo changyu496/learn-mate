@@ -314,10 +314,10 @@ export class Learner {
     let understood = false;
 
     if (userMessage === 'correct') {
-      // 用户选择了"我理解了"
-      response = `好的，${teachingPoint.concept} 这个概念你已经理解了。继续下一个吗？`;
-      understood = true;
+      // 用户选择了"我理解了"，直接继续下一个概念
       this.store.createOrUpdateLearningRecord(userId, lectureId);
+      // 直接返回下一组选项让用户选下一个概念
+      return this.teachNextConcept(userId, lectureId, state.conceptIndex);
     } else if (userMessage === 'need_example') {
       // 用户选择了"有点模糊，需要例子"
       response = `好，我举个例子来说明 ${teachingPoint.concept}...` +
