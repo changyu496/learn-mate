@@ -363,6 +363,18 @@ ${userMessage}
 
   // 继续对话式教学
   private async continueTeaching(userId: string, lectureId: string, userMessage: string): Promise<TeachingResponse> {
+    // 如果没有 lectureId，说明用户还没有开始学习，引导开始学习
+    if (!lectureId) {
+      const nextLectureId = await this.getNextLecture(userId);
+      if (nextLectureId) {
+        return this.teach(userId, nextLectureId);
+      }
+      return {
+        type: 'question',
+        message: '还没有开始学习，要现在开始吗？'
+      };
+    }
+
     const profile = this.store.getUserProfile(userId);
     const lecture = this.course.getLecture(lectureId);
     const history = this.store.getConversationHistory(userId, lectureId);
