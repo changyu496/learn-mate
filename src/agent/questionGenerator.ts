@@ -1,6 +1,4 @@
 import type { TeachingPoint, LectureWithPoints } from '../curriculum/parser.js';
-import type { Message } from '../llm/client.js';
-import { LLMClient } from '../llm/client.js';
 
 // Re-export TeachingPoint for use in Learner
 export type { TeachingPoint };
@@ -20,199 +18,159 @@ export interface Question {
 
 export type TeachingPhase = 'introduce' | 'verify' | 'practice' | 'mastery';
 
+/**
+ * QuestionGenerator - 直接使用课程内容生成选项
+ *
+ * 核心原则：选项结构是固定的，内容来自 reference/ 目录中的课程数据
+ * LLM 只负责生成教学内容，不负责生成选项结构
+ */
 export class QuestionGenerator {
-  private llm: LLMClient;
-
-  constructor(llm: LLMClient) {
-    this.llm = llm;
-  }
-
   /**
    * 生成概念列表选项
-   * 让用户选择要学习哪个概念
+   * 直接使用 lecture.teachingPoints 数据，不需要 LLM
    */
-  async generateConceptListOptions(lecture: LectureWithPoints): Promise<Question> {
-    const conceptList = lecture.teachingPoints
-      .map((tp, i) => `${i + 1}. ${tp.concept}：${tp.explanation.substring(0, 50)}...`)
-      .join('\n');
+  generateConceptListOptions(lecture: LectureWithPoints): Question {
+    // 直接用 teachingPoints 构建选项
+    const conceptOptions: QuestionOption[] = lecture.teachingPoints.map((tp, i) => ({
+      label: `${i + 1}. ${tp.concept}`,
+      description: tp.explanation.substring(0, 60) + (tp.explanation.length > 60 ? '...' : ''),
+      value: `concept:${i}`
+    }));
 
-    const messages: Message[] = [
+    // 添加通用选项
+    const options: QuestionOption[] = [
+      ...conceptOptions,
       {
-        role: 'system',
-        content: `你是 AI 私教，擅长设计多选题选项。
-
-设计原则：
-1. 选项要简洁明确（1-5 个字）
-2. 每个选项描述要清楚（1 句话）
-3. 选项之间要互斥
-4. 包含一个"其他"选项让用户自由输入
-
-请生成概念列表选择选项：`
+        label: '从头开始',
+        description: '按顺序学习第一个概念',
+        value: 'concept:0'
       },
       {
-        role: 'user',
-        content: `课程：${lecture.title}
-概念列表：
-${conceptList}
-
-请生成选项：
-- 选项 1-N：让用户选择第几个概念学习
-- 选项：我想问一个问题
-- 选项：继续当前对话
-
-请以 JSON 格式返回：
-{
-  "options": [
-    {"label": "概念1：xxx", "description": "描述", "value": "concept:1"},
-    ...
-  ]
-}`
+        label: '我想问问题',
+        description: '关于课程的问题',
+        value: 'ask'
       }
     ];
 
-    const response = await this.llm.generate(messages);
-    return this.parseQuestionResponse(response, 'select');
+    return {
+      question: '你想学习哪个概念？',
+      header: '选择',
+      options,
+      multiSelect: false
+    };
   }
 
   /**
    * 生成概念介绍问题
-   * 基于 Claude Code teach-me 的设计：
-   * - 先给 1-2 句话介绍
-   * - 然后问一个选择题帮助用户思考
+   * 直接使用 teachingPoint.question 和预设选项模板
    */
-  async generateIntroduceQuestion(teachingPoint: TeachingPoint, userName?: string): Promise<Question> {
-    const messages: Message[] = [
+  generateIntroduceQuestion(teachingPoint: TeachingPoint, _userName?: string): Question {
+    // 使用 teachingPoint.question 作为问题
+    const questionText = teachingPoint.question ||
+      `你能用自己的话说说"${teachingPoint.concept}"是什么意思吗？`;
+
+    // 预设的验证选项（理解、应用、练习三层）
+    const options: QuestionOption[] = [
       {
-        role: 'system',
-        content: `你是 AI 私教，教授"Harness 工程"。
-
-风格：简洁友好，像朋友聊天。**先定义，再解释，最后给例子**。
-
-根据 Claude Code teach-me 的设计原则：
-- 选项是思考的 scaffolds，不是限制
-- 选项要帮助用户组织思考
-- 包含正确选项、误解干扰项、"我不确定"选项
-- 每个选项要有 description 提供 hint
-
-设计问题选项：
-1. 1-2 个正确/部分正确的选项
-2. 1 个基于常见误解的干扰项
-3. 1 个"我不确定"选项
-
-选项格式：
-- label: 简短选项文本
-- description: 选项解释或 hint
-- value: 内部使用的值`
+        label: '我理解了',
+        description: '概念已经清楚，可以继续',
+        value: 'correct'
       },
       {
-        role: 'user',
-        content: `概念：${teachingPoint.concept}
-定义：${teachingPoint.explanation}
-
-请为这个概念设计一个介绍问题，帮助用户理解。
-
-请以 JSON 格式返回：
-{
-  "question": "问题文本",
-  "header": "理解",
-  "options": [
-    {"label": "选项1", "description": "描述", "value": "correct:1"},
-    {"label": "选项2", "description": "描述", "value": "correct:2"},
-    {"label": "选项3（误解）", "description": "描述", "value": "misconception"},
-    {"label": "我不确定", "description": "没关系，我们一起探索", "value": "unsure"}
-  ]
-}`
+        label: '有点模糊',
+        description: '还需要举个例子',
+        value: 'need_example'
+      },
+      {
+        label: '完全不懂',
+        description: '需要换个角度解释',
+        value: 'not_understand'
       }
     ];
 
-    const response = await this.llm.generate(messages);
-    return this.parseQuestionResponse(response, 'introduce');
+    return {
+      question: questionText,
+      header: '理解检查',
+      options,
+      multiSelect: false
+    };
   }
 
   /**
    * 生成验证理解问题
-   * 三层验证：理解 → 应用 → 练习
+   * 直接使用预设问题模板 + teachingPoint 数据
    */
-  async generateVerifyQuestion(
+  generateVerifyQuestion(
     teachingPoint: TeachingPoint,
     phase: TeachingPhase,
-    userAnswer?: string
-  ): Promise<Question> {
+    _userAnswer?: string
+  ): Question {
     const phaseConfig = {
       introduce: {
         header: '理解检查',
-        question: `你能用自己的话说说"${teachingPoint.concept}"是什么意思吗？`
+        question: `你能用自己的话说说"${teachingPoint.concept}"是什么意思吗？`,
+        options: [
+          { label: '我理解了', description: '能用自己的话解释', value: 'correct' },
+          { label: '有点模糊', description: '还需要更多例子', value: 'need_example' },
+          { label: '不太懂', description: '需要换个角度', value: 'not_understand' }
+        ]
       },
       verify: {
         header: '应用检查',
-        question: `如果让你在实际场景中使用"${teachingPoint.concept}"，你会怎么做？`
+        question: `如果让你在实际场景中使用"${teachingPoint.concept}"，你会怎么做？`,
+        options: [
+          { label: '我知道怎么用', description: '能给出一个实际例子', value: 'correct' },
+          { label: '大概知道', description: '但不确定细节', value: 'partial' },
+          { label: '不知道怎么用', description: '需要更多指导', value: 'not_understand' }
+        ]
       },
       practice: {
         header: '练习',
-        question: `写一段代码或描述，展示"${teachingPoint.concept}"的应用`
+        question: `写一段代码或描述，展示"${teachingPoint.concept}"的应用`,
+        options: [
+          { label: '我能写出来', description: '有代码或描述', value: 'correct' },
+          { label: '能说但不能写', description: '需要更多示例', value: 'partial' },
+          { label: '完全不会', description: '需要手把手教', value: 'not_understand' }
+        ]
       },
       mastery: {
         header: '掌握确认',
-        question: `现在你能解释清楚"${teachingPoint.concept}"，并用它解决一个新问题吗？`
+        question: `现在你能解释清楚"${teachingPoint.concept}"，并用它解决一个新问题吗？`,
+        options: [
+          { label: '完全掌握', description: '能解释能应用', value: 'correct' },
+          { label: '基本掌握', description: '还有一些细节', value: 'partial' },
+          { label: '还不熟练', description: '需要再练练', value: 'not_understand' }
+        ]
       }
     };
 
     const config = phaseConfig[phase];
 
-    const messages: Message[] = [
-      {
-        role: 'system',
-        content: `你是 AI 私教，教授"Harness 工程"。
-
-根据 Claude Code teach-me 设计：
-- 选项帮助用户组织思考
-- 包含正确选项、误解干扰项、"我不确定"选项
-- 选项的 description 要提供 hint
-
-设计验证问题选项。`
-      },
-      {
-        role: 'user',
-        content: `概念：${teachingPoint.concept}
-定义：${teachingPoint.explanation}
-验证阶段：${phase}
-问题：${config.question}
-${userAnswer ? `用户回答：${userAnswer}` : ''}
-
-请以 JSON 格式返回：
-{
-  "question": "问题文本",
-  "header": "${config.header}",
-  "options": [
-    {"label": "选项1", "description": "描述", "value": "correct"},
-    {"label": "选项2", "description": "描述", "value": "partial"},
-    {"label": "选项3（误解）", "description": "描述", "value": "incorrect"},
-    {"label": "我不确定", "description": "描述", "value": "unsure"}
-  ]
-}`
-      }
-    ];
-
-    const response = await this.llm.generate(messages);
-    return this.parseQuestionResponse(response, phase);
+    return {
+      question: config.question,
+      header: config.header,
+      options: config.options,
+      multiSelect: false
+    };
   }
 
   /**
    * 生成下一个概念选项
+   * 直接构建，不需要 LLM
    */
-  async generateNextConceptOptions(
+  generateNextConceptOptions(
     currentIndex: number,
     totalConcepts: number,
     remainingConcepts: TeachingPoint[]
-  ): Promise<Question> {
+  ): Question {
     const options: QuestionOption[] = [];
 
     // 如果还有下一个概念，提供继续选项
-    if (currentIndex < totalConcepts - 1) {
+    if (currentIndex < totalConcepts - 1 && remainingConcepts.length > 0) {
       const nextConcept = remainingConcepts[0];
       options.push({
         label: `下一个：${nextConcept.concept}`,
-        description: '继续学习下一个概念',
+        description: nextConcept.explanation.substring(0, 50) + '...',
         value: 'next'
       });
     }
@@ -242,67 +200,6 @@ ${userAnswer ? `用户回答：${userAnswer}` : ''}
       question: '你想怎么做？',
       header: '选择',
       options,
-      multiSelect: false
-    };
-  }
-
-  /**
-   * 解析 LLM 返回的 JSON 问题
-   */
-  private parseQuestionResponse(response: string, type: string): Question {
-    try {
-      // 尝试提取 JSON
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-
-        // 验证必需字段
-        if (parsed.options && Array.isArray(parsed.options)) {
-          return {
-            question: parsed.question || '请选择：',
-            header: parsed.header || '选择',
-            options: parsed.options.map((opt: { label: string; description?: string; value?: string }, i: number) => ({
-              label: opt.label || `选项 ${i + 1}`,
-              description: opt.description || '',
-              value: opt.value || `option:${i}`
-            })),
-            multiSelect: parsed.multiSelect || false
-          };
-        }
-      }
-    } catch {
-      // JSON 解析失败，使用默认选项
-    }
-
-    // 返回默认选项（降级方案）
-    return this.getDefaultQuestion(type);
-  }
-
-  /**
-   * 获取默认问题（当 LLM 调用失败时）
-   */
-  private getDefaultQuestion(type: string): Question {
-    if (type === 'select') {
-      return {
-        question: '请选择：',
-        header: '选择',
-        options: [
-          { label: '第一个概念', description: '从头开始学习', value: 'concept:0' },
-          { label: '我想问问题', description: '关于课程的疑问', value: 'ask' },
-          { label: '继续对话', description: '继续当前话题', value: 'continue' }
-        ],
-        multiSelect: false
-      };
-    }
-
-    return {
-      question: '你的理解是？',
-      header: '理解',
-      options: [
-        { label: '我理解了', description: '概念已经清楚', value: 'correct' },
-        { label: '部分理解', description: '还有一些疑问', value: 'partial' },
-        { label: '不太懂', description: '需要更多解释', value: 'unsure' }
-      ],
       multiSelect: false
     };
   }

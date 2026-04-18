@@ -34,7 +34,7 @@ export class Learner {
     this.store = store;
     this.llm = llm;
     this.course = course;
-    this.questionGenerator = new QuestionGenerator(llm);
+    this.questionGenerator = new QuestionGenerator();
   }
 
   // 入课对话 - 了解用户，建立画像
