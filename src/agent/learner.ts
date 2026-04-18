@@ -192,6 +192,12 @@ export class Learner {
       };
     }
 
+    // 处理验证回答选项
+    if (choice === 'correct' || choice === 'need_example' || choice === 'not_understand') {
+      // 用户选择验证选项，调用 verifyUnderstanding 评估并生成下一组选项
+      return this.verifyUnderstanding(userId, state.lectureId, choice, '理解');
+    }
+
     // 默认继续对话
     return this.continueTeaching(userId, state.lectureId, choice);
   }
@@ -294,8 +300,6 @@ export class Learner {
     const state = this.store.getTeachingState(userId);
     const lectureWithPoints = await this.course.getLectureWithTeachingPoints(lectureId);
 
-    this.store.addConversation(userId, lectureId, 'user', userMessage);
-
     if (!lectureWithPoints || !state) {
       return {
         type: 'incorrect',
@@ -305,8 +309,29 @@ export class Learner {
 
     const teachingPoint = lectureWithPoints.teachingPoints[state.conceptIndex];
 
-    // 判断用户回答是否正确/充分
-    const evaluationPrompt = `你是 AI 私教，教授"Harness 工程"——如何为 AI Agent 构建可靠执行环境的工程方法论。不是 CI/CD 平台。
+    // 根据用户选择的验证选项判断
+    let response: string;
+    let understood = false;
+
+    if (userMessage === 'correct') {
+      // 用户选择了"我理解了"
+      response = `好的，${teachingPoint.concept} 这个概念你已经理解了。继续下一个吗？`;
+      understood = true;
+      this.store.createOrUpdateLearningRecord(userId, lectureId);
+    } else if (userMessage === 'need_example') {
+      // 用户选择了"有点模糊，需要例子"
+      response = `好，我举个例子来说明 ${teachingPoint.concept}...` +
+        `\n\n${teachingPoint.example || `比如，${teachingPoint.concept} 可以想象成...`}`;
+      understood = false;
+    } else if (userMessage === 'not_understand') {
+      // 用户选择了"完全不懂"
+      response = `没关系，我换个角度来说。${teachingPoint.concept} 的核心意思是...`;
+      understood = false;
+    } else {
+      // 其他情况，当作自由回答处理
+      this.store.addConversation(userId, lectureId, 'user', userMessage);
+
+      const evaluationPrompt = `你是 AI 私教，教授"Harness 工程"——如何为 AI Agent 构建可靠执行环境的工程方法论。不是 CI/CD 平台。
 
 用户正在学习"${lectureWithPoints.title}" - "${teachingPoint.concept}"
 验证类型：${type}
@@ -325,25 +350,27 @@ ${userMessage}
 
 回复要简短，不超过 80 字。`;
 
-    const response = await this.llm.generate([
-      { role: 'system', content: evaluationPrompt }
-    ]);
+      response = await this.llm.generate([
+        { role: 'system', content: evaluationPrompt }
+      ]);
 
-    // 判断是否理解（简化判断）
-    const understood = !response.includes('不太对') && !response.includes('有点偏差') && !response.includes('再想想');
+      understood = !response.includes('不太对') && !response.includes('有点偏差') && !response.includes('再想想');
 
-    if (understood) {
-      this.store.createOrUpdateLearningRecord(userId, lectureId);
-    } else {
-      const lastQuestion = this.store.getConversationHistory(userId, lectureId)
-        .filter(m => m.role === 'assistant')
-        .pop();
+      if (understood) {
+        this.store.createOrUpdateLearningRecord(userId, lectureId);
+      } else {
+        const lastQuestion = this.store.getConversationHistory(userId, lectureId)
+          .filter(m => m.role === 'assistant')
+          .pop();
 
-      if (lastQuestion) {
-        this.store.addWeakPoint(userId, lectureId, lastQuestion.content);
+        if (lastQuestion) {
+          this.store.addWeakPoint(userId, lectureId, lastQuestion.content);
+        }
       }
     }
 
+    // 保存对话
+    this.store.addConversation(userId, lectureId, 'user', userMessage);
     this.store.addConversation(userId, lectureId, 'assistant', response);
 
     // 生成下一个选项
