@@ -180,8 +180,8 @@ export class Learner {
     }
 
     if (choice === 'continue') {
-      // 继续对话
-      return this.continueTeaching(userId, state.lectureId, '');
+      // 继续下一个概念
+      return this.teachNextConcept(userId, state.lectureId, state.conceptIndex);
     }
 
     if (choice === 'exit') {
@@ -373,6 +373,19 @@ ${userMessage}
         type: 'question',
         message: '还没有开始学习，要现在开始吗？'
       };
+    }
+
+    // 检查用户是否想继续下一个概念
+    const continuePhrases = ['继续', '下一个', 'next', 'continue'];
+    const wantsNext = continuePhrases.some(phrase =>
+      userMessage.toLowerCase().includes(phrase.toLowerCase())
+    );
+
+    if (wantsNext) {
+      const state = this.store.getTeachingState(userId);
+      if (state) {
+        return this.teachNextConcept(userId, lectureId, state.conceptIndex);
+      }
     }
 
     const profile = this.store.getUserProfile(userId);
