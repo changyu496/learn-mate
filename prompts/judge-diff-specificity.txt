@@ -1,0 +1,24 @@
+学员正在做 harness engineering 课程的 step-4（重跑对照）。他们完成了两次 session：v1（裸提示词）和 v2（有 harness）。随后自己写了 diff-notes.md 描述两次差异。
+
+任务：判断 diff-notes.md 是否指出了 ≥ 2 个"具体差异"。
+
+"具体差异"的标准：
+
+- 引用了 v1/v2 log 中可观察到的行为（例："v1 没跑 mvn test；v2 每改一次都跑了"）
+- 不是泛泛的评价（例："v2 更好"、"harness 有用"）
+
+输入三份文件：session-log.txt 是 v1，session-log-v2.txt 是 v2，diff-notes.md 是学员写的对比笔记。
+
+{{FILES}}
+
+用下列 JSON 回复（不要 markdown 代码块）：
+
+{
+  "pass": true | false,
+  "items": [
+    { "diff": "学员指出的差异简述", "concrete": true | false, "reason": "为何判此" }
+  ],
+  "feedback": "整体反馈，鼓励学员从哪些方面再观察"
+}
+
+pass 规则：至少 2 个 items 的 concrete: true。

@@ -1,0 +1,19 @@
+{
+  "name": "learn-mate",
+  "version": "0.1.0",
+  "description": "让 AI 带你真正学会，而不是收藏后吃灰",
+  "type": "module",
+  "bin": {
+    "learn-mate": "bin/learn-mate.js"
+  },
+  "scripts": {
+    "start": "node bin/learn-mate.js"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

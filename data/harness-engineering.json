@@ -1,0 +1,163 @@
+{
+  "id": "harness-engineering",
+  "title": "Harness Engineering 实战（Java）",
+  "language": "java",
+  "templateId": "java-todo-cli",
+  "intro": "模型能力很强，但放到真实仓库里跑就常常翻车：agent 跳过步骤、破坏测试、说\"做完了\"但其实没跑通。你多半吃过亏。\n\n这不是模型的问题，是工作环境的问题。Harness engineering 就是围绕 agent 搭建一套工作环境（指令、状态、验证、范围、生命周期），让同一个模型从\"不可靠\"变成\"可靠\"——是质变，不是微调。\n\n这门课带你在一个真实的 Java 项目上实操。你会做一次对照实验：裸提示词 vs 加了 harness 的同一个 prompt，亲眼看到差异。学完你能在自己项目里配出能跑得稳的 agent 工作环境。\n\n约 2-3 小时，5 步实操。",
+  "backgroundQuestions": [
+    {
+      "id": "agent-exp",
+      "text": "你使用 coding agent（Claude Code / Codex / Cursor 等）的频率？",
+      "options": [
+        { "value": "never", "label": "没用过" },
+        { "value": "occasional", "label": "偶尔用" },
+        { "value": "daily", "label": "每天用" }
+      ]
+    },
+    {
+      "id": "agents-md",
+      "text": "对 AGENTS.md / CLAUDE.md 这类 agent 配置文件的熟悉度？",
+      "options": [
+        { "value": "unknown", "label": "没听过" },
+        { "value": "seen", "label": "见过但没写过" },
+        { "value": "wrote", "label": "写过" }
+      ]
+    },
+    {
+      "id": "goal",
+      "text": "你学这门课的主要目的？",
+      "options": [
+        { "value": "career", "label": "想往 LLM 应用方向发展" },
+        { "value": "project", "label": "解决自己项目里 agent 不稳的问题" },
+        { "value": "curious", "label": "纯粹好奇，想了解" }
+      ]
+    },
+    {
+      "id": "pace",
+      "text": "期望的学习节奏？",
+      "options": [
+        { "value": "weekend", "label": "一个周末拿下（2 天）" },
+        { "value": "week", "label": "一周内完成" },
+        { "value": "twoweeks", "label": "两周内完成" },
+        { "value": "flexible", "label": "灵活，不设 deadline" }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "step-0",
+      "title": "裸提示词对照",
+      "goal": "不加任何 harness，让内置 agent 尝试补完 todo-cli 的剩余命令，记录失败点作为基线",
+      "teachingFile": "harness-engineering/step-0.md",
+      "deliverables": [".learn-mate/session-log.txt"],
+      "agentPrompt": "这是一个 Java 8 + Maven 的 todo-cli 项目，位于当前目录。目前只有 add 子命令实现。请实现 list、done、delete、search 四个子命令，并让 `mvn -q test` 通过。",
+      "agentLogFile": ".learn-mate/session-log.txt",
+      "agentMaxTurns": 20,
+      "rubric": {
+        "rules": [
+          { "type": "file_exists", "path": ".learn-mate/session-log.txt" },
+          { "type": "min_lines", "path": ".learn-mate/session-log.txt", "minLines": 50 }
+        ],
+        "llmChecks": [
+          {
+            "id": "baseline-failures",
+            "description": "log 中识别出 ≥ 2 个失败模式",
+            "inputPaths": [".learn-mate/session-log.txt"],
+            "passCriteria": "at_least_2_failures_identified"
+          }
+        ]
+      }
+    },
+    {
+      "id": "step-1",
+      "title": "编写 AGENTS.md",
+      "goal": "为项目添加指令文件，覆盖 harness 五要素（指令/状态/验证/范围/生命周期）",
+      "teachingFile": "harness-engineering/step-1.md",
+      "deliverables": ["AGENTS.md"],
+      "rubric": {
+        "rules": [
+          { "type": "file_exists", "path": "AGENTS.md" },
+          { "type": "min_chars", "path": "AGENTS.md", "minChars": 500 }
+        ],
+        "llmChecks": [
+          {
+            "id": "five-elements",
+            "description": "覆盖 harness 五要素（指令/状态/验证/范围/生命周期）",
+            "inputPaths": ["AGENTS.md"],
+            "passCriteria": "all_five_elements_covered"
+          }
+        ]
+      }
+    },
+    {
+      "id": "step-2",
+      "title": "编写 init.sh",
+      "goal": "用一条命令完成安装 + 验证 + 启动，退出码 0 视为通过",
+      "teachingFile": "harness-engineering/step-2.md",
+      "deliverables": ["init.sh"],
+      "rubric": {
+        "rules": [
+          { "type": "file_exists", "path": "init.sh" },
+          { "type": "has_shebang", "path": "init.sh" },
+          { "type": "exec_exit_zero", "cmd": "bash init.sh", "timeoutSec": 180 }
+        ],
+        "llmChecks": []
+      }
+    },
+    {
+      "id": "step-3",
+      "title": "编写 feature_list.json",
+      "goal": "把剩余命令写成机器可读的功能清单，含显式完成标记",
+      "teachingFile": "harness-engineering/step-3.md",
+      "deliverables": ["feature_list.json"],
+      "rubric": {
+        "rules": [
+          { "type": "file_exists", "path": "feature_list.json" },
+          { "type": "valid_json", "path": "feature_list.json" },
+          {
+            "type": "json_shape",
+            "path": "feature_list.json",
+            "requires": {
+              "arrayPath": "features",
+              "minItems": 4,
+              "itemFields": ["id", "description", "done"]
+            }
+          }
+        ],
+        "llmChecks": [
+          {
+            "id": "description-specificity",
+            "description": "每个 feature 的 description 是否足够具体（能让 agent 据此写代码）",
+            "inputPaths": ["feature_list.json"],
+            "passCriteria": "at_least_3_descriptions_specific"
+          }
+        ]
+      }
+    },
+    {
+      "id": "step-4",
+      "title": "重跑同一个提示词",
+      "goal": "在 harness 齐备的仓库上重跑 step-0 的提示词，对比两次 session 差异",
+      "teachingFile": "harness-engineering/step-4.md",
+      "deliverables": [".learn-mate/session-log-v2.txt", "diff-notes.md"],
+      "agentPrompt": "这是一个 Java 8 + Maven 的 todo-cli 项目，位于当前目录。目前只有 add 子命令实现。请实现 list、done、delete、search 四个子命令，并让 `mvn -q test` 通过。",
+      "agentLogFile": ".learn-mate/session-log-v2.txt",
+      "agentMaxTurns": 25,
+      "rubric": {
+        "rules": [
+          { "type": "file_exists", "path": ".learn-mate/session-log-v2.txt" },
+          { "type": "file_exists", "path": "diff-notes.md" },
+          { "type": "min_chars", "path": "diff-notes.md", "minChars": 200 }
+        ],
+        "llmChecks": [
+          {
+            "id": "diff-specificity",
+            "description": "diff-notes 是否指出 ≥ 2 个具体差异",
+            "inputPaths": [".learn-mate/session-log.txt", ".learn-mate/session-log-v2.txt", "diff-notes.md"],
+            "passCriteria": "at_least_2_concrete_diffs"
+          }
+        ]
+      }
+    }
+  ]
+}

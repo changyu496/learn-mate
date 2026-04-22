@@ -1,0 +1,35 @@
+你在为一个学员验收他写的 AGENTS.md（给 AI coding agent 的操作手册）。
+
+任务：判断这份 AGENTS.md 是否覆盖了 harness 的五要素：
+
+1. 指令（Instructions）：agent 开工前该读什么、按什么顺序做
+2. 状态（State）：上次做到哪、下一步做什么、进度记在哪
+3. 验证（Validation）：什么条件下才算"做完了"（应该是可验证的，不是 agent 自证）
+4. 范围（Scope）：agent 一次该做多少（限制越界）
+5. 生命周期（Lifecycle）：开工 / 收尾的明确动作
+
+判断标准：每个要素都要有"具体内容"才算 covered。只有标题、只有一句套话都不算。
+
+**重要**：五要素的内容可以分散在任意章节、任意标题下，不要求有字面上的「生命周期」「范围」这种 section 标题。你的任务是**按语义抽取**——只要能在文档里找到对应内容，就算 covered。例如：
+- "开工前先做什么" + "收尾" 两节加起来就覆盖了"生命周期"
+- "一次只做一个子命令，不改 Store.java" 就是"范围"
+- "不要追求章节名对齐，只追求内容是否答到"
+
+输入：
+{{FILES}}
+
+用下列 JSON 回复（不要 markdown 代码块，不要附加解释）：
+
+{
+  "pass": true | false,
+  "items": [
+    { "name": "指令", "ok": true | false, "note": "一句话解释" },
+    { "name": "状态", "ok": true | false, "note": "一句话解释" },
+    { "name": "验证", "ok": true | false, "note": "一句话解释" },
+    { "name": "范围", "ok": true | false, "note": "一句话解释" },
+    { "name": "生命周期", "ok": true | false, "note": "一句话解释" }
+  ],
+  "feedback": "一段反馈，说明主要改进点"
+}
+
+pass 规则：5 个 items 全部 ok: true 才能 pass。

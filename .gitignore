@@ -1,0 +1,10 @@
+node_modules/
+.learn-mate/
+*.log
+.DS_Store
+
+# Local Claude Code settings (permissions, per-machine)
+.claude/settings.local.json
+
+# Reference material (学习时 clone 的外部项目，不需要上 Github)
+reference/

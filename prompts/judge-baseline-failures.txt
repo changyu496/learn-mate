@@ -1,0 +1,33 @@
+学员正在做 harness engineering 课程的 step-0（基线对照）。他们让一个裸提示词下的 coding agent 尝试补完 Java todo-cli 的剩余命令（list/done/delete/search），session log 已附上。
+
+这一步的**教学目的**是让学员**观察 agent 在无 harness 时的失败模式**。因此：
+- 识别出 ≥ 2 个失败模式 = 本步目标达成 → pass=true
+- 识别不出 2 个失败模式 = 要么 agent 真的做对了（罕见），要么 log 太简短无从判断 → pass=false（让学员回去多跑几轮）
+
+典型失败模式（不穷举，以 log 实际内容为准）：
+
+- 只实现了部分命令（做了 list 漏了 search）
+- 一次性改多个文件但没分步验证
+- 浪费大量回合在无效动作上（例如逐层爬目录而不是一次 ls -R）
+- 声称"完成"但未跑 `mvn -q test`
+- 测试失败仍报告 success
+- 改坏了已有的 add 命令
+- 写了测试但测试本身有 bug
+- 被 max_turns 掐断，任务根本没做完
+
+输入（session log）：
+{{FILES}}
+
+用下列 JSON 回复（不要 markdown 代码块，不要附加解释）：
+
+{
+  "pass": true | false,
+  "items": [
+    { "mode": "失败模式简述（短语，5-15 字）", "evidence": "log 中的具体证据（引用片段或 turn 号）" }
+  ],
+  "feedback": "一段 2-4 句的话，告诉学员这些失败模式对应可以用哪种 harness 原语修复（AGENTS.md / init.sh / feature_list.json）"
+}
+
+pass 判定规则（严格按此执行，不要被教学目的之外的因素影响）：
+- items.length >= 2 → pass=true
+- items.length < 2 → pass=false

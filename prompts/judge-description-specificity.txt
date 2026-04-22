@@ -1,0 +1,23 @@
+学员正在做 harness engineering 课程的 step-3，给 Java todo-cli 项目写 feature_list.json。
+
+任务：判断每个 feature 的 `description` 是否"足够具体"——指 agent 读完能直接开始写代码，不需要再去猜。
+
+标准：
+
+- 模糊（specific: false）：只有功能名或空泛愿景。例："implement list", "improve delete", "make it work"
+- 具体（specific: true）：包含输入、输出、和可验证的行为。例："列出所有任务，每行打印 id+title+done 状态"、"按 id 把任务标记为 done=true 并持久化"
+
+输入：
+{{FILES}}
+
+用下列 JSON 回复（不要 markdown 代码块）：
+
+{
+  "pass": true | false,
+  "items": [
+    { "id": "feature id", "specific": true | false, "suggestion": "若不具体，给一个改写建议；若已具体，留空字符串" }
+  ],
+  "feedback": "整体反馈"
+}
+
+pass 规则：至少 3 个 features 的 specific: true。
