@@ -143,9 +143,12 @@ v0.1.0 验证时用的是 **qwen-plus via DashScope**——其它 OpenAI-compati
 遇到"为什么是现在这个设计"类疑问时，按这个顺序读：
 
 1. `README.md` — 产品层（面向用户/学员）
-2. `docs/real-qwen-validation.md` — 为什么立住的证据 + 架构 bug 修复史
-3. `BACKLOG.md` — 还没解决的 P0/P1/P2
-4. `data/harness-engineering/step-*.md` — 课程实际教什么
-5. `git log` — 最近变更动机
+2. `docs/strategy.md` — **方向性决策**（产品往哪走、要不要加功能、什么是主战场）
+3. `docs/real-qwen-validation.md` — 为什么立住的证据 + 架构 bug 修复史
+4. `BACKLOG.md` — 还没解决的 P0/P1/P2（战术层）
+5. `data/harness-engineering/step-*.md` — 课程实际教什么
+6. `git log` — 最近变更动机
+
+**特别提醒**：动手加功能前先读 `docs/strategy.md`——它列了当前阶段"不该做什么"比"该做什么"更明确。
 
 不要只读代码就动手——这项目有相当一部分"为什么这样"藏在上面几份文档里。
