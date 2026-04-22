@@ -499,6 +499,74 @@ learn-mate agent
 
 ---
 
+## 在另一台机器上继续开发
+
+换电脑时的最小路径。
+
+### 1. 环境落地（约 10 分钟）
+
+```bash
+git clone https://github.com/changyu496/learn-mate.git
+cd learn-mate
+npm install
+
+# 配 LLM（挑一家，详见「快速开始」）
+export DASHSCOPE_API_KEY='sk-...'
+export LEARN_MATE_BASE_URL='https://dashscope.aliyuncs.com/compatible-mode/v1'
+export LEARN_MATE_MODEL='qwen-plus'
+
+# 冒烟
+node bin/learn-mate.js --help
+```
+
+只要 `--help` 能列出 `init / start / check / agent / status`，环境就通了。
+
+### 2. 恢复上下文（按阅读顺序）
+
+| 顺序 | 文件 | 看完能干嘛 |
+|---|---|---|
+| 1 | `README.md`（就是这份） | 搞清楚产品是什么、架构长啥样 |
+| 2 | `BACKLOG.md` | 看下一步应该做什么（P0 三条） |
+| 3 | `docs/real-qwen-validation.md` | 看「为什么现在是这样」的证据，改 harness 前必读 |
+| 4 | `CLAUDE.md` | agent 协作手册（见下条） |
+
+### 3. `CLAUDE.md` 会自动注入 Claude Code 会话
+
+本项目根目录有 `CLAUDE.md`——当你在项目目录里打开 **Claude Code CLI / IDE 扩展** 开新会话时，它会被自动加载到 session context 开头。**你不需要手动让 agent 去读它**。
+
+生效范围：
+
+| 场景 | 是否自动读 `CLAUDE.md` |
+|---|---|
+| Claude Code 在项目根 | ✅ 自动注入 |
+| Claude Code 进入子目录 | ✅ 子目录的叠加 |
+| `~/.claude/CLAUDE.md`（用户级全局） | ✅ 所有会话加载 |
+| claude.ai 网页版 | ❌ 要手动贴 |
+| Cursor / Codex CLI / Cline 等 | ❌ 它们读 `AGENTS.md` |
+
+验证注入生效：新会话第一句问「你知道这个项目是什么、下一步该做什么吗？」，如果它能直接说出 `v0.1.0` / `BACKLOG` P0 #1 / harness engineering，就是生效了。
+
+> **跨工具兼容提示**：如果要在 Cursor / Codex CLI 等其它 agent 工具里也享受自动注入，复制一份 `CLAUDE.md` → `AGENTS.md` 即可（或用 symlink 保持 DRY）。本项目自身的内置 agent 在 `src/agent/loop.js::loadProjectInstructions` 里会**先找 `AGENTS.md` 再找 `CLAUDE.md`**，两份都能识别。
+
+### 4. 不会跟着 git 走的东西
+
+这些在 `.gitignore` 里，新机器要重建：
+
+| 文件 | 要不要恢复 | 怎么恢复 |
+|---|---|---|
+| `node_modules/` | 要 | `npm install` |
+| `.learn-mate/` | 不用（每机器独立的 progress） | 跑 `init` / `start` 自然生成 |
+| `reference/` | **不一定要**。只有做"借鉴 Claude Code 自动注入机制"类功能时需要 | 按需 clone 外部 repo |
+| `.claude/settings.local.json` | 不用（本机器权限 allowlist） | Claude Code 会话里前几次用命令时允许一次即可 |
+| `LEARN_MATE_*` / `*_API_KEY` 环境变量 | 要 | 写进 `~/.zshrc` / `~/.bashrc` |
+| `/tmp/lm-real-step0/`（MVP-1 验证产物） | 不用 | 关键证据已归档在 `docs/real-qwen-validation.md` |
+
+### 5. 第一锤建议
+
+打开 `BACKLOG.md`，从 **P0 #1（`step-4` 自动 reset `src/`）** 开始——半天能做完，改完端到端重跑一次 5 步课程就能看到提升。不要同时改多条——这项目自己教的「单任务聚焦」，我们自己先做到。
+
+---
+
 ## 致谢
 
 - **课程原材料**：`reference/learn-harness-engineering/` 目录下的六个 harness 项目（Obed Marsh 原版英文 + 中文翻译）。本产品把其中的项目 01（Java todo-cli）改造成带验收环节的带学课程。
